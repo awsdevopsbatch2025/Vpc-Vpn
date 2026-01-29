@@ -15,7 +15,6 @@ module "new_vpc" {
 
 # ==============================================================================
 # SECTION 2: SECURITY VPC INSPECTION (GWLB Endpoints)
-# Fixed: Using subnet_ids as a list to resolve Terraform validation error.
 # ==============================================================================
 resource "aws_vpc_endpoint" "gwlb_endpoints" {
   count             = 4
