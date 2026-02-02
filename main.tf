@@ -22,6 +22,7 @@ resource "aws_vpc_endpoint" "gwlb_endpoints" {
   vpc_id            = module.new_vpc.vpc_id
   vpc_endpoint_type = "GatewayLoadBalancer"
   
+  # plural attribute used to clear VS Code error
   subnet_ids        = [module.new_vpc.firewall_subnets[count.index]]
 
   tags = { Name = "gwlbe-az-${count.index}" }
@@ -34,7 +35,7 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "workload_attachment" {
   subnet_ids             = module.new_vpc.private_subnets
   transit_gateway_id     = var.tgw_id
   vpc_id                 = module.new_vpc.vpc_id
-  appliance_mode_support = "enable"
+  appliance_mode_support = "enable" # Required for firewall symmetry
 
   tags = { Name = "tgw-attach-new-workload" }
 }
@@ -44,9 +45,10 @@ resource "aws_ec2_transit_gateway_route_table_association" "workload_assoc" {
   transit_gateway_route_table_id = var.workload_tgw_rt_id
 }
 
+# Corrected: Propagate to the On-Prem/VPN table so they can find us
 resource "aws_ec2_transit_gateway_route_table_propagation" "workload_prop" {
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.workload_attachment.id
-  transit_gateway_route_table_id = var.workload_tgw_rt_id
+  transit_gateway_route_table_id = var.on_prem_tgw_rt_id
 }
 
 # ==============================================================================
@@ -54,14 +56,13 @@ resource "aws_ec2_transit_gateway_route_table_propagation" "workload_prop" {
 # ==============================================================================
 resource "aws_security_group" "workload_sg" {
   name        = "workload-internal-sg"
-  description = "Allows traffic from internal bank network and GCP"
   vpc_id      = module.new_vpc.vpc_id
 
   ingress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["10.0.0.0/8", var.on_prem_internal_cidr]
+    cidr_blocks = ["10.0.0.0/8", var.on_prem_internal_cidr] # Allows GCP Subnet
   }
 
   egress {
@@ -77,7 +78,7 @@ resource "aws_security_group" "workload_sg" {
 # ==============================================================================
 resource "aws_customer_gateway" "gcp_cgw" {
   bgp_asn    = var.bgp_asn
-  ip_address = var.on_prem_public_ip # From GCP Screenshot: 34.124.9.4
+  ip_address = var.on_prem_public_ip
   type       = "ipsec.1"
   tags       = { Name = "GCP-VPN-Gateway" }
 }
@@ -94,7 +95,7 @@ resource "aws_vpn_connection" "tgw_vpn" {
 # SECTION 6: ROUTING LOGIC (The Traffic Brain)
 # ==============================================================================
 
-# 6a. VPC Route Table: Send all egress (0.0.0.0/0) to GWLB Endpoints first
+# 6a. VPC Route Table: All egress goes to GWLB Endpoints first
 resource "aws_route" "vpc_to_gwlbe" {
   count                  = length(module.new_vpc.private_route_table_ids)
   route_table_id         = module.new_vpc.private_route_table_ids[count.index]
@@ -102,16 +103,23 @@ resource "aws_route" "vpc_to_gwlbe" {
   vpc_endpoint_id        = aws_vpc_endpoint.gwlb_endpoints[count.index].id
 }
 
-# 6b. Snowflake Return Path
+# 6b. Snowflake Return Path (Snowflake RT -> Our VPC)
 resource "aws_ec2_transit_gateway_route" "snowflake_to_vpc" {
   destination_cidr_block         = var.vpc_cidr
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.workload_attachment.id
   transit_gateway_route_table_id = var.snowflake_tgw_rt_id
 }
 
-# 6c. GCP Return Path
+# 6c. GCP/On-Prem Return Path (On-Prem RT -> Our VPC)
 resource "aws_ec2_transit_gateway_route" "on_prem_to_vpc" {
   destination_cidr_block         = var.vpc_cidr
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.workload_attachment.id
   transit_gateway_route_table_id = var.on_prem_tgw_rt_id
+}
+
+# 6d. Forward Path to GCP VPN (Workload RT -> GCP VPN)
+resource "aws_ec2_transit_gateway_route" "workload_to_gcp" {
+  destination_cidr_block         = var.on_prem_internal_cidr
+  transit_gateway_attachment_id  = aws_vpn_connection.tgw_vpn.transit_gateway_attachment_id
+  transit_gateway_route_table_id = var.workload_tgw_rt_id
 }

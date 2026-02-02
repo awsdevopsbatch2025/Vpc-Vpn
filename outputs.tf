@@ -19,7 +19,7 @@ output "vpn_tunnel1_address" {
 }
 
 output "vpn_tunnel1_preshared_key" {
-  description = "The secret key for the first AWS VPN tunnel"
+  description = "The secret key for the first AWS VPN tunnel (Use in GCP Peer VPN setup)"
   value       = aws_vpn_connection.tgw_vpn.tunnel1_preshared_key
   sensitive   = true
 }
@@ -30,12 +30,12 @@ output "vpn_tunnel2_address" {
 }
 
 output "vpn_tunnel2_preshared_key" {
-  description = "The secret key for the second AWS VPN tunnel"
+  description = "The secret key for the second AWS VPN tunnel (Use in GCP Peer VPN setup)"
   value       = aws_vpn_connection.tgw_vpn.tunnel2_preshared_key
   sensitive   = true
 }
 
 output "aws_bgp_asn" {
   description = "The BGP ASN of the AWS Transit Gateway side"
-  value       = 64512 # Default for AWS TGW unless changed in your environment
+  value       = 64512 # Confirmed from your AWS Console screenshot
 }
