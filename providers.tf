@@ -3,11 +3,20 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0" # This uses the latest stable AWS features
+      version = "~> 5.0"
+    }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
     }
   }
 }
 
 provider "aws" {
-  region = "us-west-2" # This must match where your TGW lives
+  region = "us-west-2"
+}
+
+provider "google" {
+  project = "your-gcp-project-id" # Replace with your project ID
+  region  = "asia-southeast1"    # Or whichever region you use
 }

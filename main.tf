@@ -123,3 +123,89 @@ resource "aws_ec2_transit_gateway_route" "workload_to_gcp" {
   transit_gateway_attachment_id  = aws_vpn_connection.tgw_vpn.transit_gateway_attachment_id
   transit_gateway_route_table_id = var.workload_tgw_rt_id
 }
+
+# ==============================================================================
+# SECTION 7: GCP SIDE - THE OTHER HALF OF THE BRIDGE
+# ==============================================================================
+
+# 1. Create the HA VPN Gateway in GCP
+resource "google_compute_ha_vpn_gateway" "gcp_gateway" {
+  name    = "gcp-aws-ha-vpn"
+  network = "default" # ACTION: Replace with your GCP VPC Name
+}
+
+# 2. Define AWS as the Peer Gateway
+resource "google_compute_external_vpn_gateway" "aws_peer" {
+  name            = "aws-tgw-peer"
+  redundancy_type = "TWO_IPS_REDUNDANCY"
+  
+  interface {
+    id         = 0
+    ip_address = aws_vpn_connection.tgw_vpn.tunnel1_address
+  }
+  interface {
+    id         = 1
+    ip_address = aws_vpn_connection.tgw_vpn.tunnel2_address
+  }
+}
+
+# 3. Create the Cloud Router
+resource "google_compute_router" "gcp_router" {
+  name    = "gcp-aws-router"
+  network = "default" # ACTION: Replace with your GCP VPC Name
+  bgp {
+    asn = var.bgp_asn # 65000
+  }
+}
+
+# 4. VPN Tunnels
+resource "google_compute_vpn_tunnel" "tunnel_1" {
+  name                            = "aws-tunnel-1"
+  vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_gateway.id
+  peer_external_gateway           = google_compute_external_vpn_gateway.aws_peer.id
+  peer_external_gateway_interface = 0
+  shared_secret                   = aws_vpn_connection.tgw_vpn.tunnel1_preshared_key
+  router                          = google_compute_router.gcp_router.id
+  vpn_gateway_interface           = 0
+}
+
+resource "google_compute_vpn_tunnel" "tunnel_2" {
+  name                            = "aws-tunnel-2"
+  vpn_gateway                     = google_compute_ha_vpn_gateway.gcp_gateway.id
+  peer_external_gateway           = google_compute_external_vpn_gateway.aws_peer.id
+  peer_external_gateway_interface = 1
+  shared_secret                   = aws_vpn_connection.tgw_vpn.tunnel2_preshared_key
+  router                          = google_compute_router.gcp_router.id
+  vpn_gateway_interface           = 1
+}
+
+# 5. BGP Interfaces (The IP Handshake)
+resource "google_compute_router_interface" "if_1" {
+  name       = "if-aws-tunnel-1"
+  router     = google_compute_router.gcp_router.name
+  ip_range   = "${aws_vpn_connection.tgw_vpn.tunnel1_cgw_inside_address}/30"
+  vpn_tunnel = google_compute_vpn_tunnel.tunnel_1.name
+}
+
+resource "google_compute_router_peer" "peer_1" {
+  name            = "peer-aws-tunnel-1"
+  router          = google_compute_router.gcp_router.name
+  peer_ip_address = aws_vpn_connection.tgw_vpn.tunnel1_vgw_inside_address
+  peer_asn        = 64512
+  interface       = google_compute_router_interface.if_1.name
+}
+
+resource "google_compute_router_interface" "if_2" {
+  name       = "if-aws-tunnel-2"
+  router     = google_compute_router.gcp_router.name
+  ip_range   = "${aws_vpn_connection.tgw_vpn.tunnel2_cgw_inside_address}/30"
+  vpn_tunnel = google_compute_vpn_tunnel.tunnel_2.name
+}
+
+resource "google_compute_router_peer" "peer_2" {
+  name            = "peer-aws-tunnel-2"
+  router          = google_compute_router.gcp_router.name
+  peer_ip_address = aws_vpn_connection.tgw_vpn.tunnel2_vgw_inside_address
+  peer_asn        = 64512
+  interface       = google_compute_router_interface.if_2.name
+}
