@@ -22,7 +22,7 @@ resource "aws_vpc_endpoint" "gwlb_endpoints" {
   vpc_id            = module.new_vpc.vpc_id
   vpc_endpoint_type = "GatewayLoadBalancer"
   
-  # plural attribute used to clear VS Code error
+  
   subnet_ids        = [module.new_vpc.firewall_subnets[count.index]]
 
   tags = { Name = "gwlbe-az-${count.index}" }
@@ -45,7 +45,7 @@ resource "aws_ec2_transit_gateway_route_table_association" "workload_assoc" {
   transit_gateway_route_table_id = var.workload_tgw_rt_id
 }
 
-# Corrected: Propagate to the On-Prem/VPN table so they can find us
+
 resource "aws_ec2_transit_gateway_route_table_propagation" "workload_prop" {
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.workload_attachment.id
   transit_gateway_route_table_id = var.on_prem_tgw_rt_id
